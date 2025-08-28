@@ -12,6 +12,7 @@ import shutil
 import struct
 import base64
 import json
+import zipfile
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 import numpy as np
@@ -34,7 +35,7 @@ except ImportError:
 class GLBToUSDCConverter:
     """GLBからUSDCへの完全変換を行うクラス"""
     
-    def __init__(self, input_path: str, output_path: Optional[str] = None, verbose: bool = False, extract_textures: bool = False):
+    def __init__(self, input_path: str, output_path: Optional[str] = None, verbose: bool = False, extract_textures: bool = False, create_zip: bool = False):
         """初期化"""
         self.input_path = Path(input_path)
         if not self.input_path.exists():
@@ -50,6 +51,7 @@ class GLBToUSDCConverter:
         
         self.verbose = verbose
         self.extract_textures = extract_textures
+        self.create_zip = create_zip
         self.gltf = None
         self.stage = None
         self.buffer_cache = {}
@@ -475,6 +477,47 @@ class GLBToUSDCConverter:
         self.material_cache[material_idx] = material_path
         return material_path
     
+    def create_output_zip(self) -> Optional[Path]:
+        """出力されたUSDCファイルとテクスチャフォルダーをZIPファイルにまとめる"""
+        if not self.create_zip:
+            return None
+            
+        try:
+            glb_name = self.input_path.stem
+            zip_path = self.output_path.with_suffix('.zip')
+            
+            self.log(f"Creating ZIP archive: {zip_path}")
+            
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # USDCファイルをGLBファイル名のフォルダー内に配置
+                if self.output_path.exists():
+                    arcname = f"{glb_name}/{self.output_path.name}"
+                    zipf.write(self.output_path, arcname)
+                    self.log(f"  Added to ZIP: {arcname}")
+                
+                # テクスチャフォルダーを追加（存在する場合）
+                texture_dir = self.output_path.parent / f"{glb_name}_textures"
+                if texture_dir.exists() and texture_dir.is_dir():
+                    for texture_file in texture_dir.rglob('*'):
+                        if texture_file.is_file():
+                            # ZIPファイル内でのパス（GLBファイル名フォルダー内のテクスチャフォルダー）
+                            relative_path = texture_file.relative_to(texture_dir)
+                            arcname = f"{glb_name}/{texture_dir.name}/{relative_path}"
+                            zipf.write(texture_file, arcname)
+                            self.log(f"  Added to ZIP: {arcname}")
+            
+            if zip_path.exists():
+                self.log(f"ZIP archive created successfully: {zip_path}")
+                self.log(f"ZIP file size: {zip_path.stat().st_size:,} bytes")
+                return zip_path
+            else:
+                self.log("Failed to create ZIP archive")
+                return None
+                
+        except Exception as e:
+            self.log(f"Error creating ZIP archive: {e}")
+            return None
+    
     def convert_node(self, node_idx: int, parent_path: str = '/root') -> str:
         """GLTFノードをUSDに変換"""
         node = self.gltf.model.nodes[node_idx]
@@ -570,6 +613,11 @@ class GLBToUSDCConverter:
                     self.log(f"Converted {len(self.mesh_cache)} meshes")
                     self.log(f"Converted {len(self.material_cache)} materials")
                 
+                # ZIP作成（オプション）
+                zip_path = self.create_output_zip()
+                if zip_path:
+                    self.log(f"Output files packaged in ZIP: {zip_path}")
+                
                 return True
             else:
                 self.log("Conversion failed: output file not created")
@@ -592,6 +640,7 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('--batch', action='store_true', help='Batch convert all GLB files in directory')
     parser.add_argument('--extract-textures', action='store_true', help='Extract texture files to disk (default: no extraction)')
+    parser.add_argument('--create-zip', action='store_true', help='Create ZIP archive containing USDC file and textures')
     
     args = parser.parse_args()
     
@@ -619,11 +668,15 @@ def main():
         for glb_file in glb_files:
             print(f"Processing: {glb_file.name}")
             try:
-                converter = GLBToUSDCConverter(str(glb_file), verbose=args.verbose, extract_textures=args.extract_textures)
+                converter = GLBToUSDCConverter(str(glb_file), verbose=args.verbose, extract_textures=args.extract_textures, create_zip=args.create_zip)
                 if converter.convert():
                     success_count += 1
                     if not args.verbose:
-                        print(f"  ✅ Converted to {converter.output_path.name}")
+                        output_info = f"Converted to {converter.output_path.name}"
+                        if args.create_zip:
+                            zip_name = converter.output_path.with_suffix('.zip').name
+                            output_info += f" (ZIP: {zip_name})"
+                        print(f"  ✅ {output_info}")
                 else:
                     failed_files.append(glb_file.name)
                     print(f"  ❌ Failed to convert {glb_file.name}")
@@ -647,7 +700,7 @@ def main():
         
     else:
         # 単一ファイル変換モード
-        converter = GLBToUSDCConverter(args.input, args.output, args.verbose, extract_textures=args.extract_textures)
+        converter = GLBToUSDCConverter(args.input, args.output, args.verbose, extract_textures=args.extract_textures, create_zip=args.create_zip)
         if not converter.convert():
             sys.exit(1)
 
