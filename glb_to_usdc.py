@@ -34,7 +34,7 @@ except ImportError:
 class GLBToUSDCConverter:
     """GLBからUSDCへの完全変換を行うクラス"""
     
-    def __init__(self, input_path: str, output_path: Optional[str] = None, verbose: bool = False):
+    def __init__(self, input_path: str, output_path: Optional[str] = None, verbose: bool = False, extract_textures: bool = False):
         """初期化"""
         self.input_path = Path(input_path)
         if not self.input_path.exists():
@@ -49,6 +49,7 @@ class GLBToUSDCConverter:
             self.output_path = self.input_path.with_suffix('.usdc')
         
         self.verbose = verbose
+        self.extract_textures = extract_textures
         self.gltf = None
         self.stage = None
         self.buffer_cache = {}
@@ -67,6 +68,100 @@ class GLBToUSDCConverter:
         if sanitized and sanitized[0].isdigit():
             sanitized = '_' + sanitized
         return sanitized or 'unnamed'
+    
+    def _process_texture(self, texture_index: int, material_name: str, texture_type: str) -> Optional[str]:
+        """GLTFテクスチャを処理してUSDで使用可能な形式に変換"""
+        try:
+            if not self.gltf.model.textures or texture_index >= len(self.gltf.model.textures):
+                self.log(f"    Warning: Texture index {texture_index} not found")
+                return None
+            
+            texture = self.gltf.model.textures[texture_index]
+            
+            # イメージのインデックスを取得
+            if not hasattr(texture, 'source') or texture.source is None:
+                self.log(f"    Warning: Texture {texture_index} has no source image")
+                return None
+            
+            image_index = texture.source
+            
+            if not self.gltf.model.images or image_index >= len(self.gltf.model.images):
+                self.log(f"    Warning: Image index {image_index} not found")
+                return None
+            
+            image = self.gltf.model.images[image_index]
+            
+            # 埋め込みテクスチャ（バイナリ）の処理
+            if hasattr(image, 'bufferView') and image.bufferView is not None:
+                # バッファから画像データを抽出
+                buffer_view_index = image.bufferView
+                if buffer_view_index < len(self.gltf.model.bufferViews):
+                    buffer_view = self.gltf.model.bufferViews[buffer_view_index]
+                    buffer_idx = buffer_view.buffer
+                    
+                    if buffer_idx in self.buffer_cache:
+                        buffer_data = self.buffer_cache[buffer_idx]
+                        byte_offset = buffer_view.byteOffset or 0
+                        byte_length = buffer_view.byteLength
+                        
+                        # 画像データを抽出
+                        image_data = buffer_data[byte_offset:byte_offset + byte_length]
+                        
+                        # ファイル拡張子を推定（MIMEタイプから）
+                        mime_type = getattr(image, 'mimeType', 'image/jpeg')
+                        if 'png' in mime_type.lower():
+                            ext = '.png'
+                        elif 'jpeg' in mime_type.lower() or 'jpg' in mime_type.lower():
+                            ext = '.jpg'
+                        else:
+                            ext = '.jpg'  # デフォルト
+                        
+                        # テクスチャファイルを出力ディレクトリに保存
+                        texture_filename = f"{material_name}_{texture_type}_{texture_index}{ext}"
+                        
+                        if self.extract_textures:
+                            texture_path = self.output_path.parent / texture_filename
+                            with open(texture_path, 'wb') as f:
+                                f.write(image_data)
+                            self.log(f"    Extracted texture: {texture_filename} ({len(image_data)} bytes)")
+                            # 相対パスを返す
+                            return f"./{texture_filename}"
+                        else:
+                            self.log(f"    Texture extraction disabled: {texture_filename}")
+                            # テクスチャファイルを出力せずに、USDで直接バイナリデータを使用
+                            return None
+            
+            # 外部ファイル参照（URI）の処理
+            elif hasattr(image, 'uri') and image.uri:
+                # データURIかファイルパスか判定
+                if image.uri.startswith('data:'):
+                    self.log(f"    Warning: Data URI textures not fully supported yet")
+                    return None
+                else:
+                    # 外部ファイル参照
+                    original_path = self.input_path.parent / image.uri
+                    if original_path.exists():
+                        texture_filename = f"{material_name}_{texture_type}_{texture_index}{original_path.suffix}"
+                        
+                        if self.extract_textures:
+                            # ファイルを出力ディレクトリにコピー
+                            texture_path = self.output_path.parent / texture_filename
+                            import shutil
+                            shutil.copy2(original_path, texture_path)
+                            self.log(f"    Copied texture: {texture_filename}")
+                            return f"./{texture_filename}"
+                        else:
+                            self.log(f"    Texture extraction disabled: {texture_filename}")
+                            return None
+                    else:
+                        self.log(f"    Warning: External texture file not found: {image.uri}")
+                        return None
+            
+            return None
+            
+        except Exception as e:
+            self.log(f"    Error processing texture {texture_index}: {e}")
+            return None
     
     def load_gltf(self):
         """GLTFファイルをロード"""
@@ -272,27 +367,59 @@ class GLBToUSDCConverter:
             pbr = material.pbrMetallicRoughness
             self.log(f"  Processing PBR material: {material_name}")
             
-            # ベースカラー
-            base_color = default_base_color
-            if hasattr(pbr, 'baseColorFactor') and pbr.baseColorFactor is not None:
-                if isinstance(pbr.baseColorFactor, (list, tuple)) and len(pbr.baseColorFactor) >= 3:
-                    base_color = pbr.baseColorFactor
-                    self.log(f"    Base color: {base_color[:3]}")
+            # ベースカラーテクスチャをチェック
+            has_base_color_texture = False
+            if hasattr(pbr, 'baseColorTexture') and pbr.baseColorTexture is not None:
+                texture_info = pbr.baseColorTexture
+                if hasattr(texture_info, 'index') and texture_info.index is not None:
+                    # テクスチャがある場合
+                    texture_path = self._process_texture(texture_info.index, material_name, 'baseColor')
+                    if texture_path:
+                        # テクスチャサンプラーを作成
+                        sampler = UsdShade.Shader.Define(self.stage, f'{material_path}/baseColorSampler')
+                        sampler.CreateIdAttr('UsdUVTexture')
+                        sampler.CreateInput('file', Sdf.ValueTypeNames.Asset).Set(texture_path)
+                        
+                        # テクスチャ座標を設定（通常はst）
+                        primvar_reader = UsdShade.Shader.Define(self.stage, f'{material_path}/stReader')
+                        primvar_reader.CreateIdAttr('UsdPrimvarReader_float2')
+                        primvar_reader.CreateInput('varname', Sdf.ValueTypeNames.Token).Set('st')
+                        
+                        # 接続: primvarReader -> sampler -> shader
+                        sampler.CreateInput('st', Sdf.ValueTypeNames.Float2).ConnectToSource(
+                            primvar_reader.ConnectableAPI(), 'result')
+                        shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).ConnectToSource(
+                            sampler.ConnectableAPI(), 'rgb')
+                        
+                        has_base_color_texture = True
+                        self.log(f"    Base color texture: {texture_path}")
+            
+            # テクスチャがない場合はベースカラーファクターを使用
+            if not has_base_color_texture:
+                base_color = default_base_color
+                if hasattr(pbr, 'baseColorFactor') and pbr.baseColorFactor is not None:
+                    if isinstance(pbr.baseColorFactor, (list, tuple)) and len(pbr.baseColorFactor) >= 3:
+                        base_color = pbr.baseColorFactor
+                        self.log(f"    Base color: {base_color[:3]}")
+                    else:
+                        self.log(f"    Warning: Invalid baseColorFactor format: {pbr.baseColorFactor}")
                 else:
-                    self.log(f"    Warning: Invalid baseColorFactor format: {pbr.baseColorFactor}")
-            else:
-                self.log(f"    Using default base color: {default_base_color[:3]}")
+                    self.log(f"    Using default base color: {default_base_color[:3]}")
+                
+                # 色を設定
+                color = base_color[:3]
+                shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(
+                    Gf.Vec3f(float(color[0]), float(color[1]), float(color[2]))
+                )
             
-            # 色を設定
-            color = base_color[:3]
-            shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(
-                Gf.Vec3f(float(color[0]), float(color[1]), float(color[2]))
-            )
-            
-            # 不透明度
-            if len(base_color) > 3:
-                shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(float(base_color[3]))
+            # 不透明度（テクスチャがない場合のみ）
+            if not has_base_color_texture:
+                if len(base_color) > 3:
+                    shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(float(base_color[3]))
+                else:
+                    shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(1.0)
             else:
+                # テクスチャがある場合はデフォルトの不透明度
                 shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(1.0)
             
             # メタリック
@@ -454,6 +581,7 @@ def main():
     parser.add_argument('-o', '--output', help='Output USDC file path (optional, ignored in batch mode)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('--batch', action='store_true', help='Batch convert all GLB files in directory')
+    parser.add_argument('--extract-textures', action='store_true', help='Extract texture files to disk (default: no extraction)')
     
     args = parser.parse_args()
     
@@ -481,7 +609,7 @@ def main():
         for glb_file in glb_files:
             print(f"Processing: {glb_file.name}")
             try:
-                converter = GLBToUSDCConverter(str(glb_file), verbose=args.verbose)
+                converter = GLBToUSDCConverter(str(glb_file), verbose=args.verbose, extract_textures=args.extract_textures)
                 if converter.convert():
                     success_count += 1
                     if not args.verbose:
@@ -509,7 +637,7 @@ def main():
         
     else:
         # 単一ファイル変換モード
-        converter = GLBToUSDCConverter(args.input, args.output, args.verbose)
+        converter = GLBToUSDCConverter(args.input, args.output, args.verbose, extract_textures=args.extract_textures)
         if not converter.convert():
             sys.exit(1)
 

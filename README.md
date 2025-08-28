@@ -6,6 +6,7 @@ GLBファイルをUSDC形式に完全変換するPythonツールです。メッ�
 
 - ✅ **完全なメッシュ変換**: 全ての頂点データ、法線、UV座標を保持
 - ✅ **PBRマテリアル保持**: ベースカラー、メタリック、ラフネス、透明度
+- ✅ **テクスチャサポート**: 埋め込みテクスチャの抽出と変換（オプション）
 - ✅ **階層構造の保持**: GLTFノード構造をUSD階層に正確に変換
 - ✅ **バイナリデータの直接処理**: GLBファイルのバイナリチャンクから直接データを読み込み
 - ✅ **重複防止**: メッシュの重複や増殖を防ぐ最適化された変換
@@ -53,12 +54,28 @@ python glb_to_usdc.py /path/to/glb/directory --batch
 python glb_to_usdc.py /path/to/glb/directory --batch -v
 ```
 
+### テクスチャ抽出オプション
+
+デフォルトでは、テクスチャファイル（PNG等）は出力されず、テクスチャ情報はUSDCファイル内で参照されます：
+
+```bash
+# デフォルト動作（テクスチャファイル出力なし）
+python glb_to_usdc.py chair.glb
+
+# テクスチャファイルを明示的に抽出する場合
+python glb_to_usdc.py chair.glb --extract-textures
+
+# バッチ変換でテクスチャも抽出
+python glb_to_usdc.py /path/to/glb/directory --batch --extract-textures
+```
+
 ### コマンドラインオプション
 
 - `input`: 入力GLB/GLTFファイルパス、またはバッチ変換用ディレクトリパス（必須）
 - `-o, --output`: 出力USDCファイルパス（単一ファイル変換時のみ有効）
 - `-v, --verbose`: 詳細なログを表示（変換状況を確認できます）
 - `--batch`: バッチ変換モード - ディレクトリ内の全GLB/GLTFファイルを変換
+- `--extract-textures`: テクスチャファイルをディスクに抽出（デフォルト：抽出しない）
 
 ## 変換の詳細
 
@@ -72,11 +89,18 @@ python glb_to_usdc.py /path/to/glb/directory --batch -v
 
 **マテリアル (PBR Metallic-Roughness):**
 - ベースカラー (baseColorFactor)
+- ベースカラーテクスチャ (baseColorTexture)
 - メタリック値 (metallicFactor)
 - ラフネス値 (roughnessFactor)
 - 透明度 (alpha)
 - 両面レンダリング (doubleSided)
 - エミッシブカラー (emissiveFactor)
+
+**テクスチャサポート:**
+- 埋め込みテクスチャの抽出（PNG、JPEG）
+- UsdUVTextureシェーダーの自動作成
+- UV座標マッピング（primvar readers）
+- テクスチャ参照の最適化
 
 **階層構造:**
 - GLTFノードのトランスフォーム（平行移動、回転、スケール）
@@ -94,12 +118,24 @@ python glb_to_usdc.py /path/to/glb/directory --batch -v
 
 ## 変換例
 
-### 入力ファイル
+### 基本変換例
+**入力ファイル:**
 - `table.glb` (1.5MB) - 13個のメッシュ、3個のマテリアル、1,704個の頂点
 
-### 出力結果
+**出力結果:**
 - `table.usdc` (56KB) - 完全なメッシュデータとマテリアルを保持
 - 重複なし、単一のテーブルモデル
+
+### テクスチャ付きモデル変換例
+**入力ファイル:**
+- `chair.glb` (47KB) - 16個のメッシュ、16個のマテリアル、木目調テクスチャ
+
+**デフォルト出力:**
+- `chair.usdc` (36KB) - テクスチャ情報を含むマテリアル、外部テクスチャファイルなし
+
+**テクスチャ抽出時（`--extract-textures`）:**
+- `chair.usdc` (38KB) - テクスチャ参照付きマテリアル
+- `texture3material_effect_012_baseColor_0.png` など16個のテクスチャファイル
 
 ## トラブルシューティング
 
@@ -146,5 +182,6 @@ MITライセンス
 ## 注意事項
 
 - 複雑なアニメーションやスキニングはサポートしていません
-- テクスチャマップの埋め込みには今後対応予定
+- テクスチャは基本的にUSDCファイル内で参照されます（外部ファイル出力はオプション）
 - 大容量ファイル（100MB以上）では処理時間がかかる場合があります
+- テクスチャ抽出時は、出力ディレクトリに十分な容量があることを確認してください
