@@ -34,7 +34,7 @@ except ImportError:
 class GLBToUSDCConverter:
     """GLBからUSDCへの完全変換を行うクラス"""
     
-    def __init__(self, input_path: str, output_path: Optional[str] = None, verbose: bool = False, extract_textures: bool = False):
+    def __init__(self, input_path: str, output_path: Optional[str] = None, verbose: bool = False, extract_textures: bool = True):
         """初期化"""
         self.input_path = Path(input_path)
         if not self.input_path.exists():
@@ -581,7 +581,7 @@ def main():
     parser.add_argument('-o', '--output', help='Output USDC file path (optional, ignored in batch mode)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('--batch', action='store_true', help='Batch convert all GLB files in directory')
-    parser.add_argument('--extract-textures', action='store_true', help='Extract texture files to disk (default: no extraction)')
+    parser.add_argument('--no-extract-textures', action='store_true', help='Do not extract texture files to disk (default: extract textures)')
     
     args = parser.parse_args()
     
@@ -609,7 +609,7 @@ def main():
         for glb_file in glb_files:
             print(f"Processing: {glb_file.name}")
             try:
-                converter = GLBToUSDCConverter(str(glb_file), verbose=args.verbose, extract_textures=args.extract_textures)
+                converter = GLBToUSDCConverter(str(glb_file), verbose=args.verbose, extract_textures=not args.no_extract_textures)
                 if converter.convert():
                     success_count += 1
                     if not args.verbose:
@@ -637,7 +637,7 @@ def main():
         
     else:
         # 単一ファイル変換モード
-        converter = GLBToUSDCConverter(args.input, args.output, args.verbose, extract_textures=args.extract_textures)
+        converter = GLBToUSDCConverter(args.input, args.output, args.verbose, extract_textures=not args.no_extract_textures)
         if not converter.convert():
             sys.exit(1)
 

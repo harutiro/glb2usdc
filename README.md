@@ -56,17 +56,17 @@ python glb_to_usdc.py /path/to/glb/directory --batch -v
 
 ### テクスチャ抽出オプション
 
-デフォルトでは、テクスチャファイル（PNG等）は出力されず、テクスチャ情報はUSDCファイル内で参照されます：
+デフォルトでは、テクスチャファイル（PNG等）も出力されます：
 
 ```bash
-# デフォルト動作（テクスチャファイル出力なし）
+# デフォルト動作（テクスチャファイル出力あり）
 python glb_to_usdc.py chair.glb
 
-# テクスチャファイルを明示的に抽出する場合
-python glb_to_usdc.py chair.glb --extract-textures
+# テクスチャファイル出力を無効にする場合
+python glb_to_usdc.py chair.glb --no-extract-textures
 
-# バッチ変換でテクスチャも抽出
-python glb_to_usdc.py /path/to/glb/directory --batch --extract-textures
+# バッチ変換でテクスチャ出力を無効化
+python glb_to_usdc.py /path/to/glb/directory --batch --no-extract-textures
 ```
 
 ### コマンドラインオプション
@@ -75,7 +75,7 @@ python glb_to_usdc.py /path/to/glb/directory --batch --extract-textures
 - `-o, --output`: 出力USDCファイルパス（単一ファイル変換時のみ有効）
 - `-v, --verbose`: 詳細なログを表示（変換状況を確認できます）
 - `--batch`: バッチ変換モード - ディレクトリ内の全GLB/GLTFファイルを変換
-- `--extract-textures`: テクスチャファイルをディスクに抽出（デフォルト：抽出しない）
+- `--no-extract-textures`: テクスチャファイルの出力を無効化（デフォルト：抽出する）
 
 ## 変換の詳細
 
@@ -131,11 +131,11 @@ python glb_to_usdc.py /path/to/glb/directory --batch --extract-textures
 - `chair.glb` (47KB) - 16個のメッシュ、16個のマテリアル、木目調テクスチャ
 
 **デフォルト出力:**
-- `chair.usdc` (36KB) - テクスチャ情報を含むマテリアル、外部テクスチャファイルなし
-
-**テクスチャ抽出時（`--extract-textures`）:**
 - `chair.usdc` (38KB) - テクスチャ参照付きマテリアル
 - `texture3material_effect_012_baseColor_0.png` など16個のテクスチャファイル
+
+**テクスチャ出力無効時（`--no-extract-textures`）:**
+- `chair.usdc` (36KB) - テクスチャ情報を含むマテリアル、外部テクスチャファイルなし
 
 ## トラブルシューティング
 
@@ -182,6 +182,6 @@ MITライセンス
 ## 注意事項
 
 - 複雑なアニメーションやスキニングはサポートしていません
-- テクスチャは基本的にUSDCファイル内で参照されます（外部ファイル出力はオプション）
+- テクスチャは基本的に外部ファイルとして出力されます（無効化はオプション）
 - 大容量ファイル（100MB以上）では処理時間がかかる場合があります
 - テクスチャ抽出時は、出力ディレクトリに十分な容量があることを確認してください
