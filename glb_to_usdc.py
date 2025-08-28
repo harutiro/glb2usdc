@@ -262,31 +262,65 @@ class GLBToUSDCConverter:
         shader = UsdShade.Shader.Define(self.stage, f'{material_path}/PBRShader')
         shader.CreateIdAttr('UsdPreviewSurface')
         
+        # デフォルト値を設定
+        default_base_color = [1.0, 1.0, 1.0, 1.0]  # 白色
+        default_metallic = 0.0
+        default_roughness = 0.5
+        
         # PBRメタリックラフネス
         if hasattr(material, 'pbrMetallicRoughness') and material.pbrMetallicRoughness:
             pbr = material.pbrMetallicRoughness
+            self.log(f"  Processing PBR material: {material_name}")
             
             # ベースカラー
-            if hasattr(pbr, 'baseColorFactor') and pbr.baseColorFactor:
-                color = pbr.baseColorFactor[:3]
-                shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(
-                    Gf.Vec3f(color[0], color[1], color[2])
-                )
-                # 不透明度
-                if len(pbr.baseColorFactor) > 3:
-                    shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(pbr.baseColorFactor[3])
+            base_color = default_base_color
+            if hasattr(pbr, 'baseColorFactor') and pbr.baseColorFactor is not None:
+                if isinstance(pbr.baseColorFactor, (list, tuple)) and len(pbr.baseColorFactor) >= 3:
+                    base_color = pbr.baseColorFactor
+                    self.log(f"    Base color: {base_color[:3]}")
+                else:
+                    self.log(f"    Warning: Invalid baseColorFactor format: {pbr.baseColorFactor}")
+            else:
+                self.log(f"    Using default base color: {default_base_color[:3]}")
+            
+            # 色を設定
+            color = base_color[:3]
+            shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(
+                Gf.Vec3f(float(color[0]), float(color[1]), float(color[2]))
+            )
+            
+            # 不透明度
+            if len(base_color) > 3:
+                shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(float(base_color[3]))
+            else:
+                shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(1.0)
             
             # メタリック
+            metallic_value = default_metallic
             if hasattr(pbr, 'metallicFactor') and pbr.metallicFactor is not None:
-                shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set(float(pbr.metallicFactor))
+                metallic_value = float(pbr.metallicFactor)
+                self.log(f"    Metallic: {metallic_value}")
             else:
-                shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set(0.0)
+                self.log(f"    Using default metallic: {default_metallic}")
+            shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set(metallic_value)
             
             # ラフネス
+            roughness_value = default_roughness
             if hasattr(pbr, 'roughnessFactor') and pbr.roughnessFactor is not None:
-                shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set(float(pbr.roughnessFactor))
+                roughness_value = float(pbr.roughnessFactor)
+                self.log(f"    Roughness: {roughness_value}")
             else:
-                shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set(0.5)
+                self.log(f"    Using default roughness: {default_roughness}")
+            shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set(roughness_value)
+        else:
+            # PBRセクションがない場合はデフォルト値を設定
+            self.log(f"  No PBR section found, using defaults for: {material_name}")
+            shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(
+                Gf.Vec3f(float(default_base_color[0]), float(default_base_color[1]), float(default_base_color[2]))
+            )
+            shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(1.0)
+            shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set(default_metallic)
+            shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set(default_roughness)
         
         # エミッシブ
         if hasattr(material, 'emissiveFactor') and material.emissiveFactor:
