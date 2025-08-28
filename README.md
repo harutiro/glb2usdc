@@ -9,6 +9,7 @@ GLBファイルをUSDC形式に完全変換するPythonツールです。メッ�
 - ✅ **階層構造の保持**: GLTFノード構造をUSD階層に正確に変換
 - ✅ **バイナリデータの直接処理**: GLBファイルのバイナリチャンクから直接データを読み込み
 - ✅ **重複防止**: メッシュの重複や増殖を防ぐ最適化された変換
+- ✅ **バッチ変換対応**: ディレクトリ内の全GLBファイルを一括変換
 - ✅ **シンプルな操作**: コマンドライン一発で変換完了
 
 ## インストール
@@ -40,11 +41,24 @@ python glb_to_usdc.py input.glb -o output.usdc
 python glb_to_usdc.py input.glb -v
 ```
 
+### バッチ変換
+
+ディレクトリ内のすべてのGLB/GLTFファイルを一括変換：
+
+```bash
+# ディレクトリ内の全GLBファイルをバッチ変換
+python glb_to_usdc.py /path/to/glb/directory --batch
+
+# 詳細ログ付きでバッチ変換
+python glb_to_usdc.py /path/to/glb/directory --batch -v
+```
+
 ### コマンドラインオプション
 
-- `input`: 入力GLB/GLTFファイルパス（必須）
-- `-o, --output`: 出力USDCファイルパス（省略時は入力ファイル名.usdc）
+- `input`: 入力GLB/GLTFファイルパス、またはバッチ変換用ディレクトリパス（必須）
+- `-o, --output`: 出力USDCファイルパス（単一ファイル変換時のみ有効）
 - `-v, --verbose`: 詳細なログを表示（変換状況を確認できます）
+- `--batch`: バッチ変換モード - ディレクトリ内の全GLB/GLTFファイルを変換
 
 ## 変換の詳細
 

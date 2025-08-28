@@ -416,15 +416,68 @@ def main():
     parser = argparse.ArgumentParser(
         description='Convert GLB/GLTF files to USDC format with complete mesh and material data'
     )
-    parser.add_argument('input', help='Input GLB/GLTF file path')
-    parser.add_argument('-o', '--output', help='Output USDC file path (optional)')
+    parser.add_argument('input', help='Input GLB/GLTF file path or directory for batch conversion')
+    parser.add_argument('-o', '--output', help='Output USDC file path (optional, ignored in batch mode)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('--batch', action='store_true', help='Batch convert all GLB files in directory')
     
     args = parser.parse_args()
     
-    converter = GLBToUSDCConverter(args.input, args.output, args.verbose)
-    if not converter.convert():
-        sys.exit(1)
+    if args.batch:
+        # バッチ変換モード
+        input_path = Path(args.input)
+        if not input_path.is_dir():
+            print(f"Error: {input_path} is not a directory")
+            sys.exit(1)
+        
+        # GLB/GLTFファイルを検索
+        glb_files = list(input_path.glob('*.glb')) + list(input_path.glob('*.gltf'))
+        if not glb_files:
+            print(f"No GLB/GLTF files found in {input_path}")
+            sys.exit(1)
+        
+        print(f"Found {len(glb_files)} files to convert:")
+        for f in glb_files:
+            print(f"  - {f.name}")
+        print()
+        
+        success_count = 0
+        failed_files = []
+        
+        for glb_file in glb_files:
+            print(f"Processing: {glb_file.name}")
+            try:
+                converter = GLBToUSDCConverter(str(glb_file), verbose=args.verbose)
+                if converter.convert():
+                    success_count += 1
+                    if not args.verbose:
+                        print(f"  ✅ Converted to {converter.output_path.name}")
+                else:
+                    failed_files.append(glb_file.name)
+                    print(f"  ❌ Failed to convert {glb_file.name}")
+            except Exception as e:
+                failed_files.append(glb_file.name)
+                print(f"  ❌ Error converting {glb_file.name}: {e}")
+            print()
+        
+        # バッチ変換結果のサマリー
+        print("="*50)
+        print(f"Batch conversion complete!")
+        print(f"Successfully converted: {success_count}/{len(glb_files)} files")
+        
+        if failed_files:
+            print(f"Failed files:")
+            for failed_file in failed_files:
+                print(f"  - {failed_file}")
+        
+        if success_count < len(glb_files):
+            sys.exit(1)
+        
+    else:
+        # 単一ファイル変換モード
+        converter = GLBToUSDCConverter(args.input, args.output, args.verbose)
+        if not converter.convert():
+            sys.exit(1)
 
 
 if __name__ == '__main__':
