@@ -120,12 +120,17 @@ class GLBToUSDCConverter:
                         texture_filename = f"{material_name}_{texture_type}_{texture_index}{ext}"
                         
                         if self.extract_textures:
-                            texture_path = self.output_path.parent / texture_filename
+                            # GLBファイルごとの専用ディレクトリを作成
+                            glb_name = self.input_path.stem
+                            texture_dir = self.output_path.parent / f"{glb_name}_textures"
+                            texture_dir.mkdir(exist_ok=True)
+                            
+                            texture_path = texture_dir / texture_filename
                             with open(texture_path, 'wb') as f:
                                 f.write(image_data)
-                            self.log(f"    Extracted texture: {texture_filename} ({len(image_data)} bytes)")
+                            self.log(f"    Extracted texture: {texture_dir.name}/{texture_filename} ({len(image_data)} bytes)")
                             # 相対パスを返す
-                            return f"./{texture_filename}"
+                            return f"./{texture_dir.name}/{texture_filename}"
                         else:
                             self.log(f"    Texture extraction disabled: {texture_filename}")
                             # テクスチャファイルを出力せずに、USDで直接バイナリデータを使用
@@ -144,12 +149,17 @@ class GLBToUSDCConverter:
                         texture_filename = f"{material_name}_{texture_type}_{texture_index}{original_path.suffix}"
                         
                         if self.extract_textures:
-                            # ファイルを出力ディレクトリにコピー
-                            texture_path = self.output_path.parent / texture_filename
+                            # GLBファイルごとの専用ディレクトリを作成
+                            glb_name = self.input_path.stem
+                            texture_dir = self.output_path.parent / f"{glb_name}_textures"
+                            texture_dir.mkdir(exist_ok=True)
+                            
+                            # ファイルを専用ディレクトリにコピー
+                            texture_path = texture_dir / texture_filename
                             import shutil
                             shutil.copy2(original_path, texture_path)
-                            self.log(f"    Copied texture: {texture_filename}")
-                            return f"./{texture_filename}"
+                            self.log(f"    Copied texture: {texture_dir.name}/{texture_filename}")
+                            return f"./{texture_dir.name}/{texture_filename}"
                         else:
                             self.log(f"    Texture extraction disabled: {texture_filename}")
                             return None
