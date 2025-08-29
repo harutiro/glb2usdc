@@ -275,6 +275,114 @@ class GLBToUSDCConverter:
         
         return np.array(data)
     
+    def clean_mesh_data(self, positions, indices=None, normals=None, uvs=None, threshold=1e-6):
+        """メッシュデータをクリーンアップ（重複頂点や不正な三角形を除去）"""
+        if positions is None or len(positions) == 0:
+            return positions, indices, normals, uvs
+        
+        original_vertex_count = len(positions)
+        
+        # 大容量メッシュの場合はスキップまたは高速化
+        if original_vertex_count > 50000:
+            self.log(f"    Large mesh detected ({original_vertex_count} vertices), skipping duplicate cleanup")
+            # インデックスの妥当性チェックのみ実行
+            if indices is not None:
+                cleaned_indices = []
+                for i in range(0, len(indices), 3):
+                    triangle = indices[i:i+3]
+                    # 退化三角形（同じ頂点を持つ三角形）をスキップ
+                    if len(set(triangle)) == 3 and all(idx < original_vertex_count for idx in triangle):
+                        cleaned_indices.extend(triangle)
+                cleaned_indices = np.array(cleaned_indices) if cleaned_indices else indices
+                return positions, cleaned_indices, normals, uvs
+            return positions, indices, normals, uvs
+        
+        # 効率的な重複頂点検出（空間ハッシュマップを使用）
+        from collections import defaultdict
+        
+        # 頂点を格子セルに分割（効率的な近傍検索のため）
+        cell_size = threshold * 2  # セルサイズを閾値の2倍に設定
+        spatial_hash = defaultdict(list)
+        
+        def get_cell_key(pos):
+            return (int(pos[0] / cell_size), int(pos[1] / cell_size), int(pos[2] / cell_size))
+        
+        unique_positions = []
+        vertex_mapping = {}  # 古いインデックス -> 新しいインデックス
+        
+        for i, pos in enumerate(positions):
+            cell_key = get_cell_key(pos)
+            
+            # 現在のセルと隣接セル（3x3x3 = 27セル）を検査
+            found_duplicate = False
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    for dz in [-1, 0, 1]:
+                        neighbor_key = (cell_key[0] + dx, cell_key[1] + dy, cell_key[2] + dz)
+                        for j in spatial_hash[neighbor_key]:
+                            if np.linalg.norm(pos - unique_positions[j]) < threshold:
+                                vertex_mapping[i] = j
+                                found_duplicate = True
+                                break
+                        if found_duplicate:
+                            break
+                    if found_duplicate:
+                        break
+                if found_duplicate:
+                    break
+            
+            if not found_duplicate:
+                new_idx = len(unique_positions)
+                vertex_mapping[i] = new_idx
+                unique_positions.append(pos)
+                spatial_hash[cell_key].append(new_idx)
+        
+        cleaned_positions = np.array(unique_positions)
+        
+        # インデックスを更新
+        cleaned_indices = None
+        if indices is not None:
+            cleaned_indices = []
+            for i in range(0, len(indices), 3):
+                # 三角形の3つの頂点インデックスを取得
+                triangle = indices[i:i+3]
+                mapped_triangle = [vertex_mapping.get(idx, idx) for idx in triangle]
+                
+                # 退化三角形（同じ頂点を持つ三角形）をスキップ
+                if len(set(mapped_triangle)) == 3:
+                    cleaned_indices.extend(mapped_triangle)
+            
+            cleaned_indices = np.array(cleaned_indices)
+        
+        # 法線とUVも対応する頂点のみ保持
+        cleaned_normals = None
+        if normals is not None:
+            cleaned_normals = []
+            for i, pos in enumerate(positions):
+                if i in vertex_mapping and vertex_mapping[i] < len(cleaned_positions):
+                    new_idx = vertex_mapping[i]
+                    if new_idx == len(cleaned_normals):  # 新しい頂点の場合のみ追加
+                        cleaned_normals.append(normals[i])
+            cleaned_normals = np.array(cleaned_normals) if cleaned_normals else None
+        
+        cleaned_uvs = None
+        if uvs is not None:
+            cleaned_uvs = []
+            for i, pos in enumerate(positions):
+                if i in vertex_mapping and vertex_mapping[i] < len(cleaned_positions):
+                    new_idx = vertex_mapping[i]
+                    if new_idx == len(cleaned_uvs):  # 新しい頂点の場合のみ追加
+                        cleaned_uvs.append(uvs[i])
+            cleaned_uvs = np.array(cleaned_uvs) if cleaned_uvs else None
+        
+        self.log(f"    Cleaned mesh data: {original_vertex_count} vertices -> {len(cleaned_positions)} vertices")
+        if cleaned_indices is not None:
+            original_triangles = len(indices) // 3 if indices is not None else 0
+            cleaned_triangles = len(cleaned_indices) // 3
+            self.log(f"    Cleaned triangles: {original_triangles} -> {cleaned_triangles}")
+        
+        return cleaned_positions, cleaned_indices, cleaned_normals, cleaned_uvs
+    
     def convert_mesh(self, mesh_idx: int, parent_path: str) -> List[str]:
         """GLTFメッシュをUSDに変換"""
         cache_key = f"{mesh_idx}_{parent_path}"
@@ -292,47 +400,73 @@ class GLBToUSDCConverter:
             
             self.log(f"Converting mesh primitive: {prim_name}")
             
+            # 大容量メッシュの場合は処理時間の警告を表示
+            if hasattr(primitive.attributes, 'POSITION'):
+                position_accessor = self.gltf.model.accessors[primitive.attributes.POSITION]
+                vertex_count = position_accessor.count
+                if vertex_count > 10000:
+                    self.log(f"  Processing large mesh with {vertex_count:,} vertices, this may take some time...")
+            
             # USDメッシュを作成
             mesh_prim = UsdGeom.Mesh.Define(self.stage, prim_path)
+            
+            # データを取得
+            positions = None
+            indices = None
+            normals = None
+            uvs = None
             
             # 頂点位置
             if hasattr(primitive.attributes, 'POSITION'):
                 positions = self.get_buffer_data(primitive.attributes.POSITION)
-                if positions is not None:
-                    # numpy型をPython floatに変換
-                    points = [Gf.Vec3f(float(pos[0]), float(pos[1]), float(pos[2])) for pos in positions]
-                    mesh_prim.CreatePointsAttr(Vt.Vec3fArray(points))
-                    self.log(f"  Added {len(points)} vertices")
-            
-            # 法線
-            if hasattr(primitive.attributes, 'NORMAL'):
-                normals = self.get_buffer_data(primitive.attributes.NORMAL)
-                if normals is not None:
-                    normal_array = [Gf.Vec3f(float(n[0]), float(n[1]), float(n[2])) for n in normals]
-                    mesh_prim.CreateNormalsAttr(Vt.Vec3fArray(normal_array))
-                    mesh_prim.SetNormalsInterpolation('vertex')
-            
-            # UV座標
-            if hasattr(primitive.attributes, 'TEXCOORD_0'):
-                uvs = self.get_buffer_data(primitive.attributes.TEXCOORD_0)
-                if uvs is not None:
-                    # USDはVec2fArrayを期待
-                    primvars_api = UsdGeom.PrimvarsAPI(mesh_prim)
-                    uv_attr = primvars_api.CreatePrimvar('st', Sdf.ValueTypeNames.TexCoord2fArray)
-                    uv_array = [Gf.Vec2f(float(uv[0]), float(uv[1])) for uv in uvs]
-                    uv_attr.Set(Vt.Vec2fArray(uv_array))
-                    uv_attr.SetInterpolation('vertex')
             
             # インデックス
             if hasattr(primitive, 'indices') and primitive.indices is not None:
                 indices = self.get_buffer_data(primitive.indices)
                 if indices is not None:
                     indices = indices.flatten()
+            
+            # 法線
+            if hasattr(primitive.attributes, 'NORMAL'):
+                normals = self.get_buffer_data(primitive.attributes.NORMAL)
+            
+            # UV座標
+            if hasattr(primitive.attributes, 'TEXCOORD_0'):
+                uvs = self.get_buffer_data(primitive.attributes.TEXCOORD_0)
+            
+            # メッシュデータをクリーンアップ
+            if positions is not None:
+                cleaned_positions, cleaned_indices, cleaned_normals, cleaned_uvs = self.clean_mesh_data(
+                    positions, indices, normals, uvs
+                )
+                
+                # クリーンアップされた頂点位置を設定
+                if cleaned_positions is not None and len(cleaned_positions) > 0:
+                    points = [Gf.Vec3f(float(pos[0]), float(pos[1]), float(pos[2])) for pos in cleaned_positions]
+                    mesh_prim.CreatePointsAttr(Vt.Vec3fArray(points))
+                    self.log(f"  Added {len(points)} vertices (cleaned)")
+                
+                    # クリーンアップされた法線を設定
+                    if cleaned_normals is not None and len(cleaned_normals) > 0:
+                        normal_array = [Gf.Vec3f(float(n[0]), float(n[1]), float(n[2])) for n in cleaned_normals]
+                        mesh_prim.CreateNormalsAttr(Vt.Vec3fArray(normal_array))
+                        mesh_prim.SetNormalsInterpolation('vertex')
                     
-                    # 三角形として処理
-                    face_vertex_counts = [3] * (len(indices) // 3)
-                    mesh_prim.CreateFaceVertexCountsAttr(face_vertex_counts)
-                    mesh_prim.CreateFaceVertexIndicesAttr(Vt.IntArray(indices.tolist()))
+                    # クリーンアップされたUV座標を設定
+                    if cleaned_uvs is not None and len(cleaned_uvs) > 0:
+                        primvars_api = UsdGeom.PrimvarsAPI(mesh_prim)
+                        uv_attr = primvars_api.CreatePrimvar('st', Sdf.ValueTypeNames.TexCoord2fArray)
+                        uv_array = [Gf.Vec2f(float(uv[0]), float(uv[1])) for uv in cleaned_uvs]
+                        uv_attr.Set(Vt.Vec2fArray(uv_array))
+                        uv_attr.SetInterpolation('vertex')
+                    
+                    # クリーンアップされたインデックスを設定
+                    if cleaned_indices is not None and len(cleaned_indices) > 0:
+                        face_vertex_counts = [3] * (len(cleaned_indices) // 3)
+                        mesh_prim.CreateFaceVertexCountsAttr(face_vertex_counts)
+                        mesh_prim.CreateFaceVertexIndicesAttr(Vt.IntArray(cleaned_indices.tolist()))
+                else:
+                    self.log(f"  ⚠️ Warning: No valid vertices after cleanup for {prim_name}")
             
             # マテリアル割り当て
             if hasattr(primitive, 'material') and primitive.material is not None:
