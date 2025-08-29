@@ -67,6 +67,12 @@ python glb_to_usdc.py chair.glb --extract-textures
 
 # バッチ変換でテクスチャも抽出
 python glb_to_usdc.py /path/to/glb/directory --batch --extract-textures
+
+# テクスチャとZIPアーカイブを作成
+python glb_to_usdc.py chair.glb --extract-textures --create-zip
+
+# バッチ変換でテクスチャとZIPアーカイブを作成
+python glb_to_usdc.py /path/to/glb/directory --batch --extract-textures --create-zip
 ```
 
 ### コマンドラインオプション
@@ -76,6 +82,7 @@ python glb_to_usdc.py /path/to/glb/directory --batch --extract-textures
 - `-v, --verbose`: 詳細なログを表示（変換状況を確認できます）
 - `--batch`: バッチ変換モード - ディレクトリ内の全GLB/GLTFファイルを変換
 - `--extract-textures`: テクスチャファイルをディスクに抽出（デフォルト：抽出しない）
+- `--create-zip`: USDCファイルとテクスチャをZIPアーカイブにまとめる（テクスチャ抽出時のみ有効）
 
 ## 変換の詳細
 
@@ -136,6 +143,10 @@ python glb_to_usdc.py /path/to/glb/directory --batch --extract-textures
 **テクスチャ抽出時（`--extract-textures`）:**
 - `chair.usdc` (38KB) - テクスチャ参照付きマテリアル
 - `texture3material_effect_012_baseColor_0.png` など16個のテクスチャファイル
+
+**ZIPアーカイブ作成時（`--create-zip`）:**
+- `chair.zip` - USDCファイルとテクスチャフォルダーを含むアーカイブ
+- 配布や共有に便利な単一ファイル形式
 
 ## トラブルシューティング
 
